@@ -78,6 +78,11 @@ public class VCIssuanceServiceImpl implements VCIssuanceService {
             throw new InvalidRequestException(VCIErrorConstants.INVALID_CREDENTIAL_REQUEST);
         }
 
+        // Schema versioning is a DataProvider-mode feature; never silently ignore an explicitly requested version.
+        if(credentialRequest.getSchema_version() != null) {
+            throw new InvalidRequestException(ErrorConstants.SCHEMA_VERSION_UNSUPPORTED_IN_PLUGIN_MODE);
+        }
+
         if(!parsedAccessToken.isActive())
             throw new NotAuthenticatedException();
 

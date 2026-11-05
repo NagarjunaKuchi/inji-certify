@@ -56,4 +56,19 @@ public class Constants {
     public static final String CREDENTIAL_OFFER_PREFIX = "credential_offer:";
     public static final String PRE_AUTHORIZED_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:pre-authorized_code";
     public static final String AS_METADATA_PREFIX = "as_metadata:";
+
+    // Credential schema versioning
+    /**
+     * Separates a template key from the schema version it was resolved to, e.g.
+     * "ldp_vc-key#schemaVersion=1.1". Keys of unversioned (legacy) configurations never carry it,
+     * which keeps their template keys, cache keys and lookups exactly as before.
+     */
+    public static final String SCHEMA_VERSION_MARKER = "#schemaVersion=";
+    /** Effective version of a configuration that has no schema_version (legacy, pre-versioning rows). */
+    public static final String LEGACY_SCHEMA_VERSION = "1.0";
+    public static final String SCHEMA_STATUS_ACTIVE = "ACTIVE";
+    public static final String SCHEMA_STATUS_DEPRECATED = "DEPRECATED";
+    public static final String SCHEMA_STATUS_DISABLED = "DISABLED";
+    /** MAJOR.MINOR or MAJOR.MINOR.PATCH, numeric only, at most 9 digits per segment (fits an int). */
+    public static final String SCHEMA_VERSION_PATTERN = "^\\d{1,9}\\.\\d{1,9}(\\.\\d{1,9})?$";
 }

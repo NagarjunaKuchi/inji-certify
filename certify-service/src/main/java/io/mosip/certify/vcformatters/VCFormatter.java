@@ -85,4 +85,11 @@ public interface VCFormatter {
      * @return
      */
     String getQRSignatureAlgo(String templateName);
+
+    /**
+     * returns the JSON Schema that the data provider output must satisfy before the template is rendered.
+     * @param templateName
+     * @return the schema, or null / empty when the configuration has none (all unversioned configurations)
+     */
+    Map<String, Object> getValidationSchema(String templateName);
 }

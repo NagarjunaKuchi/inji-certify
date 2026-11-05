@@ -70,7 +70,10 @@ public class VelocityTemplatingEngineImpl implements VCFormatter {
 
     /**
      * Internal method to fetch CredentialConfig, leveraging Spring Cache.
-     * The key is expected to be "credentialType:context:credentialFormat".
+     * The key is expected to be "credentialType::context::credentialFormat" (ldp_vc),
+     * "credentialFormat::vct" (vc+sd-jwt) or "credentialFormat::doctype" (mso_mdoc).
+     * A key resolved to a specific schema version carries a trailing "#schemaVersion=MAJOR.MINOR[.PATCH]"; keys
+     * without it select the unversioned (legacy) configuration, exactly as before schema versioning existed.
      */
     @Cacheable(cacheNames = "credentialConfig", key = "#templateKey")
     protected CredentialConfig getCachedCredentialConfig(String templateKey) {
@@ -80,7 +83,15 @@ public class VelocityTemplatingEngineImpl implements VCFormatter {
             throw new CertifyException(ErrorConstants.EXPECTED_TEMPLATE_NOT_FOUND, "Invalid template key format: " + templateKey);
         }
 
-        String[] parts = templateKey.split(DELIMITER, 3);
+        String baseKey = templateKey;
+        String schemaVersion = null;
+        int markerIndex = templateKey.lastIndexOf(SCHEMA_VERSION_MARKER);
+        if (markerIndex >= 0) {
+            baseKey = templateKey.substring(0, markerIndex);
+            schemaVersion = templateKey.substring(markerIndex + SCHEMA_VERSION_MARKER.length());
+        }
+
+        String[] parts = baseKey.split(DELIMITER, 3);
         if (parts.length < 2) {
             log.error("Invalid templateKey format for getCachedCredentialConfig: {}. Expected 3 parts.", templateKey);
             throw new CertifyException(ErrorConstants.EXPECTED_TEMPLATE_NOT_FOUND, "Template key format requires 3 parts: " + templateKey);
@@ -88,15 +99,19 @@ public class VelocityTemplatingEngineImpl implements VCFormatter {
             String credentialFormat = parts[0];
             if (Objects.equals(credentialFormat, VCFormats.MSO_MDOC)) {
                 String doctype = parts[1];
-                return credentialConfigRepository.findByCredentialFormatAndDocType(credentialFormat, doctype)
-                        .orElseThrow(() -> {
+                Optional<CredentialConfig> found = schemaVersion == null
+                        ? credentialConfigRepository.findByCredentialFormatAndDocType(credentialFormat, doctype)
+                        : credentialConfigRepository.findByCredentialFormatAndDocTypeAndSchemaVersion(credentialFormat, doctype, schemaVersion);
+                return found.orElseThrow(() -> {
                             log.error("CredentialConfig not found in DB for key: {}", templateKey);
                             return new CertifyException(ErrorConstants.EXPECTED_TEMPLATE_NOT_FOUND, "CredentialConfig not found for key: " + templateKey);
                         });
             } else if (Objects.equals(credentialFormat, VCFormats.VC_SD_JWT)) {
                 String vct = parts[1];
-                return credentialConfigRepository.findByCredentialFormatAndSdJwtVct(credentialFormat, vct)
-                        .orElseThrow(() -> {
+                Optional<CredentialConfig> found = schemaVersion == null
+                        ? credentialConfigRepository.findByCredentialFormatAndSdJwtVct(credentialFormat, vct)
+                        : credentialConfigRepository.findByCredentialFormatAndSdJwtVctAndSchemaVersion(credentialFormat, vct, schemaVersion);
+                return found.orElseThrow(() -> {
                             log.error("CredentialConfig not found in DB for key: {}", templateKey);
                             return new CertifyException(ErrorConstants.EXPECTED_TEMPLATE_NOT_FOUND, "CredentialConfig not found for key: " + templateKey);
                         });
@@ -112,9 +127,10 @@ public class VelocityTemplatingEngineImpl implements VCFormatter {
         // TemplateId constructor order: context, credentialType, credentialFormat
 //        TemplateId tid = new TemplateId(context, credentialType, credentialFormat);
 
-        return credentialConfigRepository
-                .findByCredentialFormatAndCredentialTypeAndContext(credentialFormat, credentialType, context)
-                .orElseThrow(() -> {
+        Optional<CredentialConfig> found = schemaVersion == null
+                ? credentialConfigRepository.findByCredentialFormatAndCredentialTypeAndContext(credentialFormat, credentialType, context)
+                : credentialConfigRepository.findByCredentialFormatAndCredentialTypeAndContextAndSchemaVersion(credentialFormat, credentialType, context, schemaVersion);
+        return found.orElseThrow(() -> {
                     log.error("CredentialConfig not found in DB for key: {}", templateKey);
                     return new CertifyException(ErrorConstants.EXPECTED_TEMPLATE_NOT_FOUND, "CredentialConfig not found for key: " + templateKey);
                 });
@@ -202,6 +218,11 @@ public class VelocityTemplatingEngineImpl implements VCFormatter {
     @Override
     public String getQRSignatureAlgo(String templateName) {
         return getCachedCredentialConfig(templateName).getQrSignatureAlgo();
+    }
+
+    @Override
+    public Map<String, Object> getValidationSchema(String templateName) {
+        return getCachedCredentialConfig(templateName).getValidationSchema();
     }
 
     /**
