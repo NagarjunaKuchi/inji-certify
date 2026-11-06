@@ -125,6 +125,24 @@ public class CredentialConfig {
     @Column(name = "qr_signature_algo")
     private String qrSignatureAlgo;
 
+    @Comment("Optional logical name shared by all versions of one credential schema")
+    @Column(name = "schema_id")
+    private String schemaId;
+
+    @Comment("MAJOR.MINOR[.PATCH]. NULL for legacy configurations, which behave as version 1.0")
+    @Column(name = "schema_version")
+    private String schemaVersion;
+
+    @Comment("ACTIVE, DEPRECATED or DISABLED. NULL exactly when schema_version is NULL")
+    @Column(name = "schema_status")
+    private String schemaStatus;
+
+    @Comment("JSON Schema the data provider output must satisfy before templating")
+    @Type(JsonBinaryType.class)
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "validation_schema", columnDefinition = "jsonb")
+    private Map<String, Object> validationSchema;
+
     @NotNull
     @Column(name = "cr_dtimes")
     private LocalDateTime createdTimes;

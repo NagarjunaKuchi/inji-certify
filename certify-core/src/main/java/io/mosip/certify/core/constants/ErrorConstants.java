@@ -92,4 +92,20 @@ public class ErrorConstants {
     public static final String INVALID_AUTHORIZATION_SERVER = "invalid_authorization_server";
     public static final String AUTHORIZATION_SERVER_NOT_CONFIGURED = "authorization_server_not_configured";
 
+    // Credential schema versioning
+    public static final String INVALID_SCHEMA_VERSION = "invalid_schema_version";
+    public static final String SCHEMA_VERSION_NOT_FOUND = "schema_version_not_found";
+    public static final String SCHEMA_VERSION_DISABLED = "schema_version_disabled";
+    public static final String SCHEMA_VERSION_AMBIGUOUS = "schema_version_ambiguous";
+    public static final String SCHEMA_DEFAULT_VERSION_NOT_FOUND = "schema_default_version_not_found";
+    public static final String SCHEMA_NO_ACTIVE_VERSION = "schema_no_active_version";
+    public static final String SCHEMA_VALIDATION_FAILED = "schema_validation_failed";
+    public static final String INVALID_SCHEMA_DEFINITION = "invalid_schema_definition";
+    public static final String SCHEMA_VERSION_IMMUTABLE = "schema_version_immutable";
+    public static final String INVALID_SCHEMA_STATUS = "invalid_schema_status";
+    public static final String INVALID_SCHEMA_STATUS_TRANSITION = "invalid_schema_status_transition";
+    public static final String SCHEMA_VERSION_SCOPE_MISMATCH = "schema_version_scope_mismatch";
+    public static final String SCHEMA_VERSION_UNSUPPORTED_IN_PLUGIN_MODE = "schema_version_unsupported_in_plugin_mode";
+    public static final String SCHEMA_VERSION_CONFIG_EXISTS = "schema_version_config_exists";
+
 }

@@ -97,6 +97,9 @@ public class CertifyIssuanceServiceImplTest {
     @Mock
     private VelocityEnvConfig velocityEnvConfig;
 
+    @Mock
+    private SchemaVersionService schemaVersionService;
+
     @InjectMocks
     private CertifyIssuanceServiceImpl issuanceService;
 
@@ -133,6 +136,10 @@ public class CertifyIssuanceServiceImplTest {
 
 
         ReflectionTestUtils.setField(issuanceService, "cNonceExpireSeconds", 300);
+        // Schema versioning is covered by SchemaVersionServiceTest. Here it resolves to the unversioned template
+        // name, which is exactly what the service did before schema versioning existed.
+        lenient().when(schemaVersionService.resolveTemplateName(any(), any(), any()))
+                .thenAnswer(invocation -> io.mosip.certify.utils.CredentialUtils.getTemplateName(invocation.getArgument(0)));
         ReflectionTestUtils.setField(issuanceService, "didUrl", "https://test.issuer.com");
         ReflectionTestUtils.setField(issuanceService, "domainUrl", "did:example:ldp");
         ReflectionTestUtils.setField(issuanceService, "ledgerUtils", ledgerUtils);

@@ -2,10 +2,12 @@ package io.mosip.certify.core.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.mosip.certify.core.constants.Constants;
 import io.mosip.certify.core.constants.ErrorConstants;
 import io.mosip.certify.core.constants.VCIErrorConstants;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import lombok.Data;
 
 import java.util.List;
@@ -69,4 +71,20 @@ public class CredentialConfigurationDTO {
     private List<Map<String, Object>> qrSettings;
 
     private String qrSignatureAlgo;
+
+    /** Optional logical name shared by every version of one credential schema, e.g. IdentityCredential. */
+    private String schemaId;
+
+    /**
+     * MAJOR.MINOR[.PATCH]. Leave unset for a configuration that is not versioned (existing behaviour).
+     * Once a configuration is registered with a version, its definition can no longer be changed.
+     */
+    @Pattern(regexp = Constants.SCHEMA_VERSION_PATTERN, message = ErrorConstants.INVALID_SCHEMA_VERSION)
+    private String schemaVersion;
+
+    /** ACTIVE, DEPRECATED or DISABLED. New versions are always created ACTIVE; moves are forward-only. */
+    private String schemaStatus;
+
+    /** JSON Schema (draft 2020-12) that the data provider output must satisfy. Requires schemaVersion. */
+    private Map<String, Object> validationSchema;
 }

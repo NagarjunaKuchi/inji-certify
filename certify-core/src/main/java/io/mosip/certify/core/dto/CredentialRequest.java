@@ -5,6 +5,7 @@
  */
 package io.mosip.certify.core.dto;
 
+import io.mosip.certify.core.constants.Constants;
 import io.mosip.certify.core.constants.ErrorConstants;
 import io.mosip.certify.core.constants.VCIErrorConstants;
 import jakarta.validation.Valid;
@@ -13,6 +14,7 @@ import java.util.List;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 
 import java.util.Map;
 
@@ -54,4 +56,12 @@ public class CredentialRequest {
     private Map<String,Object> claims;
 
     String vct;
+
+    /**
+     * OPTIONAL. Schema version of the credential to issue, MAJOR.MINOR[.PATCH]. When absent the version is
+     * resolved from the issuer configuration, exactly as before schema versioning existed.
+     * Only honoured in DataProvider plugin mode.
+     */
+    @Pattern(regexp = Constants.SCHEMA_VERSION_PATTERN, message = ErrorConstants.INVALID_SCHEMA_VERSION)
+    private String schema_version;
 }

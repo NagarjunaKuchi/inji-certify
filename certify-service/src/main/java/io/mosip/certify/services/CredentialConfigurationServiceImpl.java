@@ -17,9 +17,13 @@ import io.mosip.certify.core.spi.CredentialConfigurationService;
 import io.mosip.certify.entity.CredentialConfig;
 import io.mosip.certify.repository.CredentialConfigRepository;
 import io.mosip.certify.utils.CredentialConfigMapper;
+import io.mosip.certify.utils.JsonSchemaDataValidator;
+import io.mosip.certify.utils.SchemaVersionResolver;
 import io.mosip.certify.validators.credentialconfigvalidators.LdpVcCredentialConfigValidator;
 import io.mosip.certify.validators.credentialconfigvalidators.MsoMdocCredentialConfigValidator;
 import io.mosip.certify.validators.credentialconfigvalidators.SdJwtCredentialConfigValidator;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -39,6 +43,9 @@ public class CredentialConfigurationServiceImpl implements CredentialConfigurati
 
     @Autowired
     private CredentialConfigMapper credentialConfigMapper;
+
+    @Autowired
+    private JsonSchemaDataValidator jsonSchemaDataValidator;
 
     @Value("${mosip.certify.domain.url}")
     private String credentialIssuer;
@@ -76,6 +83,8 @@ public class CredentialConfigurationServiceImpl implements CredentialConfigurati
 
     private static final String CREDENTIAL_CONFIG_CACHE_NAME = "credentialConfig";
 
+    private static final ObjectMapper SCHEMA_COMPARISON_MAPPER = new ObjectMapper();
+
     @Override
     public CredentialConfigResponse addCredentialConfiguration(CredentialConfigurationDTO credentialConfigurationDTO) {
         validateCredentialConfiguration(credentialConfigurationDTO, true);
@@ -83,6 +92,14 @@ public class CredentialConfigurationServiceImpl implements CredentialConfigurati
         CredentialConfig credentialConfig = credentialConfigMapper.toEntity(credentialConfigurationDTO);
         credentialConfig.setConfigId(UUID.randomUUID().toString());
         credentialConfig.setStatus(Constants.ACTIVE);
+        if (credentialConfig.getSchemaVersion() != null) {
+            if (credentialConfigurationDTO.getSchemaStatus() != null
+                    && !Constants.SCHEMA_STATUS_ACTIVE.equals(credentialConfigurationDTO.getSchemaStatus())) {
+                throw new CertifyException(ErrorConstants.INVALID_SCHEMA_STATUS,
+                        "A new schema version is always created ACTIVE. Deprecate or disable it with an update once it is published.");
+            }
+            credentialConfig.setSchemaStatus(Constants.SCHEMA_STATUS_ACTIVE);
+        }
 
 
         credentialConfig.setCryptographicBindingMethodsSupported(cryptographicBindingMethodsSupportedMap.get(credentialConfig.getCredentialFormat()));
@@ -100,6 +117,8 @@ public class CredentialConfigurationServiceImpl implements CredentialConfigurati
     }
 
     private void validateCredentialConfiguration(CredentialConfigurationDTO credentialConfig, boolean shouldCheckDuplicate) {
+
+        validateSchemaVersioning(credentialConfig);
 
         if (credentialConfig.getCredentialStatusPurposes() != null && credentialConfig.getCredentialStatusPurposes().size() > 1){
             throw new CertifyException(ErrorConstants.MULTIPLE_STATUS_PURPOSES_NOT_SUPPORTED, "Multiple credential status purposes are not supported. Please specify only one.");
@@ -153,6 +172,105 @@ public class CredentialConfigurationServiceImpl implements CredentialConfigurati
                 break;
             default:
                 throw new CertifyException(ErrorConstants.UNSUPPORTED_FORMAT, "Unsupported credential format: " + credentialConfig.getCredentialFormat());
+        }
+    }
+
+    private void validateSchemaVersioning(CredentialConfigurationDTO credentialConfig) {
+        String version = credentialConfig.getSchemaVersion();
+        if (version == null) {
+            if (credentialConfig.getSchemaId() != null || credentialConfig.getSchemaStatus() != null
+                    || credentialConfig.getValidationSchema() != null) {
+                throw new CertifyException(ErrorConstants.INVALID_SCHEMA_DEFINITION,
+                        "schemaId, schemaStatus and validationSchema can only be set together with schemaVersion.");
+            }
+            return;
+        }
+        if (pluginMode.equals("VCIssuance")) {
+            throw new CertifyException(ErrorConstants.SCHEMA_VERSION_UNSUPPORTED_IN_PLUGIN_MODE,
+                    "Schema versioning is only supported with the DataProvider plugin mode.");
+        }
+        if (!SchemaVersionResolver.isValidVersion(version)) {
+            throw new CertifyException(ErrorConstants.INVALID_SCHEMA_VERSION,
+                    "Invalid schemaVersion '" + version + "'. Expected MAJOR.MINOR or MAJOR.MINOR.PATCH.");
+        }
+        String canonical = SchemaVersionResolver.canonicalize(version);
+        if (!canonical.equals(version)) {
+            throw new CertifyException(ErrorConstants.INVALID_SCHEMA_VERSION,
+                    "schemaVersion must be written in canonical form: use '" + canonical + "' instead of '" + version + "'.");
+        }
+        if (credentialConfig.getSchemaStatus() != null && !SchemaVersionResolver.isValidStatus(credentialConfig.getSchemaStatus())) {
+            throw new CertifyException(ErrorConstants.INVALID_SCHEMA_STATUS,
+                    "Invalid schemaStatus. Allowed values: ACTIVE, DEPRECATED, DISABLED.");
+        }
+        if (credentialConfig.getValidationSchema() != null) {
+            jsonSchemaDataValidator.validateDefinition(credentialConfig.getValidationSchema());
+        }
+    }
+
+    /**
+     * Published versions are immutable. Presentation metadata (display, display order, scope, ...) may still be
+     * edited, but everything that defines the credential's structure or how it is rendered may not.
+     */
+    private void assertPublishedDefinitionUnchanged(CredentialConfig existing, CredentialConfigurationDTO requested) {
+        List<String> changed = new ArrayList<>();
+        if (!Objects.equals(existing.getSchemaId(), requested.getSchemaId())) changed.add("schemaId");
+        if (!Objects.equals(existing.getSchemaVersion(), requested.getSchemaVersion())) changed.add("schemaVersion");
+        if (!sameJson(existing.getValidationSchema(), requested.getValidationSchema())) changed.add("validationSchema");
+        if (!Objects.equals(existing.getVcTemplate(), requested.getVcTemplate())) changed.add("vcTemplate");
+        if (!Objects.equals(existing.getCredentialFormat(), requested.getCredentialFormat())) changed.add("credentialFormat");
+        if (!Objects.equals(existing.getCredentialType(), credentialConfigMapper.listToCommaSeparatedString(requested.getCredentialTypes()))) changed.add("credentialTypes");
+        if (!Objects.equals(existing.getContext(), credentialConfigMapper.listToCommaSeparatedString(requested.getContextURLs()))) changed.add("contextURLs");
+        if (!Objects.equals(existing.getSdJwtVct(), requested.getSdJwtVct())) changed.add("sdJwtVct");
+        if (!Objects.equals(existing.getDocType(), requested.getDocType())) changed.add("doctype");
+        if (!changed.isEmpty()) {
+            throw new CertifyException(ErrorConstants.SCHEMA_VERSION_IMMUTABLE,
+                    "Schema version " + existing.getSchemaVersion() + " of " + existing.getCredentialConfigKeyId()
+                            + " is published and immutable; these fields differ from the stored version: " + String.join(", ", changed)
+                            + ". Register a new schema version instead.");
+        }
+    }
+
+    /** @return the status to store: unchanged when the request names none, otherwise the requested forward transition */
+    private String nextSchemaStatus(CredentialConfig existing, String requestedStatus) {
+        if (requestedStatus == null) {
+            return existing.getSchemaStatus();
+        }
+        if (!SchemaVersionResolver.isValidStatus(requestedStatus)) {
+            throw new CertifyException(ErrorConstants.INVALID_SCHEMA_STATUS, "Invalid schemaStatus. Allowed values: ACTIVE, DEPRECATED, DISABLED.");
+        }
+        if (!SchemaVersionResolver.isAllowedTransition(existing.getSchemaStatus(), requestedStatus)) {
+            throw new CertifyException(ErrorConstants.INVALID_SCHEMA_STATUS_TRANSITION,
+                    "schemaStatus cannot move from " + existing.getSchemaStatus() + " to " + requestedStatus
+                            + ". Allowed: ACTIVE -> DEPRECATED -> DISABLED (ACTIVE -> DISABLED is also allowed).");
+        }
+        return requestedStatus;
+    }
+
+    /**
+     * An existing unversioned configuration may opt in to versioning. It keeps behaving as version 1.0, so that is
+     * the only version it can adopt; anything else would silently change what the existing credential is.
+     */
+    private String adoptSchemaVersioning(CredentialConfigurationDTO requested) {
+        if (!Constants.LEGACY_SCHEMA_VERSION.equals(requested.getSchemaVersion())) {
+            throw new CertifyException(ErrorConstants.INVALID_SCHEMA_VERSION,
+                    "An existing unversioned configuration can only adopt schemaVersion " + Constants.LEGACY_SCHEMA_VERSION
+                            + ". Register other versions as new configurations.");
+        }
+        if (requested.getSchemaStatus() != null && !Constants.SCHEMA_STATUS_ACTIVE.equals(requested.getSchemaStatus())) {
+            throw new CertifyException(ErrorConstants.INVALID_SCHEMA_STATUS,
+                    "A configuration adopting schema versioning starts ACTIVE.");
+        }
+        return Constants.SCHEMA_STATUS_ACTIVE;
+    }
+
+    private boolean sameJson(Object left, Object right) {
+        // Compared as parsed JSON text: valueToTree keeps Integer and Long apart, so an unchanged schema whose
+        // numbers were stored as one and submitted as the other would look modified. Fails closed (= "changed").
+        try {
+            return Objects.equals(SCHEMA_COMPARISON_MAPPER.readTree(SCHEMA_COMPARISON_MAPPER.writeValueAsString(left)),
+                    SCHEMA_COMPARISON_MAPPER.readTree(SCHEMA_COMPARISON_MAPPER.writeValueAsString(right)));
+        } catch (JsonProcessingException e) {
+            return false;
         }
     }
 
@@ -227,7 +345,21 @@ public class CredentialConfigurationServiceImpl implements CredentialConfigurati
         }
 
         CredentialConfig credentialConfig = optional.get();
+
+        // Schema versioning: a published (versioned) configuration may only change its lifecycle status.
+        String schemaStatusToApply = null;
+        if (credentialConfig.getSchemaVersion() != null) {
+            assertPublishedDefinitionUnchanged(credentialConfig, credentialConfigurationDTO);
+            schemaStatusToApply = nextSchemaStatus(credentialConfig, credentialConfigurationDTO.getSchemaStatus());
+        } else if (credentialConfigurationDTO.getSchemaVersion() != null) {
+            schemaStatusToApply = adoptSchemaVersioning(credentialConfigurationDTO);
+        }
+
         credentialConfigMapper.updateEntityFromDto(credentialConfigurationDTO, credentialConfig);
+        if (schemaStatusToApply != null) {
+            // The mapper copies the request's (possibly absent) status over the entity's; the checked value wins.
+            credentialConfig.setSchemaStatus(schemaStatusToApply);
+        }
 
         validateCredentialConfiguration(credentialConfigMapper.toDto(credentialConfig), false);
 
@@ -259,6 +391,12 @@ public class CredentialConfigurationServiceImpl implements CredentialConfigurati
             throw new CredentialConfigException(ErrorConstants.CONFIG_NOT_FOUND_FOR_DELETE, "Configuration not found for delete with ID: " + credentialConfigKeyId);
         }
 
+        if (optional.get().getSchemaVersion() != null) {
+            throw new CertifyException(ErrorConstants.SCHEMA_VERSION_IMMUTABLE,
+                    "Schema version " + optional.get().getSchemaVersion() + " of " + credentialConfigKeyId
+                            + " is published and cannot be deleted. Set its schemaStatus to DISABLED instead.");
+        }
+
         // The object is fetched once here.
         // The @CacheEvict's key SpEL will cause CredentialCacheKeyGenerator to fetch it again.
         credentialConfigRepository.delete(optional.get());
@@ -271,6 +409,7 @@ public class CredentialConfigurationServiceImpl implements CredentialConfigurati
         List<CredentialConfig> credentialConfigList = credentialConfigRepository.findAll()
                 .stream()
                 .filter(config -> Constants.ACTIVE.equals(config.getStatus()))
+                .filter(config -> !Constants.SCHEMA_STATUS_DISABLED.equals(config.getSchemaStatus()))
                 .toList();
 
         return switch (version) {

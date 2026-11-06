@@ -106,6 +106,9 @@ public class CertifyIssuanceServiceImpl implements VCIssuanceService {
     @Autowired
     private CredentialConfigurationService credentialConfigurationService;
 
+    @Autowired
+    private SchemaVersionService schemaVersionService;
+
     @Value("${mosip.certify.identifier}")
     private String certifyIssuer;
 
@@ -198,6 +201,8 @@ public class CertifyIssuanceServiceImpl implements VCIssuanceService {
             // Fetch data once, as it's common to all formats
             JSONObject jsonObject = dataProviderPlugin.fetchData(parsedAccessToken.getClaims());
             log.info("Data fetched successfully from Data Provider Plugin");
+            // Validated against the schema of the resolved version; taken before this object is enriched below.
+            String providedDataJson = jsonObject.toString();
 
             String templateName;
             Map<String, Object> templateParams = new HashMap<>();
@@ -210,7 +215,7 @@ public class CertifyIssuanceServiceImpl implements VCIssuanceService {
                     vcRequestDto.setType(credentialRequest.getCredential_definition().getType());
                     vcRequestDto.setCredentialSubject(credentialRequest.getCredential_definition().getCredentialSubject());
                     validateLdpVcFormatRequest(credentialRequest, credentialMetadata);
-                    templateName = CredentialUtils.getTemplateName(vcRequestDto);
+                    templateName = resolveTemplateNameAndValidate(vcRequestDto, credentialRequest, providedDataJson);
                     jsonObject.put(Constants.TYPE, credentialRequest.getCredential_definition().getType());
 
                     List<String> credentialStatusPurposeList = vcFormatter.getCredentialStatusPurpose(templateName);
@@ -224,7 +229,7 @@ public class CertifyIssuanceServiceImpl implements VCIssuanceService {
 
                 case "vc+sd-jwt":
                     vcRequestDto.setVct(credentialRequest.getVct());
-                    templateName = CredentialUtils.getTemplateName(vcRequestDto);
+                    templateName = resolveTemplateNameAndValidate(vcRequestDto, credentialRequest, providedDataJson);
                     templateParams.put(Constants.VCTYPE, vcRequestDto.getVct());
                     templateParams.put(Constants.CONFIRMATION, Map.of("kid", holderId));
                     templateParams.put(Constants.ISSUER, certifyIssuer);
@@ -233,7 +238,7 @@ public class CertifyIssuanceServiceImpl implements VCIssuanceService {
 
                 case "mso_mdoc":
                     vcRequestDto.setDoctype(credentialRequest.getDoctype());
-                    templateName = CredentialUtils.getTemplateName(vcRequestDto);
+                    templateName = resolveTemplateNameAndValidate(vcRequestDto, credentialRequest, providedDataJson);
                     templateParams.put("_doctype", vcRequestDto.getDoctype());
                     jsonObject.put(Constants.TYPE, vcRequestDto.getDoctype());
                     break;
@@ -313,6 +318,19 @@ public class CertifyIssuanceServiceImpl implements VCIssuanceService {
             log.error("Error during signing qr data: {}", e.getMessage());
             throw new CertifyException("ERROR_SIGNING_QR_DATA", e.getMessage());
         }
+    }
+
+    /**
+     * Picks the credential configuration (and with it the schema version) that must issue this request, then checks
+     * the data provider output against that version's JSON Schema. Runs before anything is written (for example a
+     * status list index), so a rejected request has no side effects.
+     */
+    private String resolveTemplateNameAndValidate(VCRequestDto vcRequestDto, CredentialRequest credentialRequest, String providedDataJson) {
+        String scopeClaim = (String) parsedAccessToken.getClaims().getOrDefault("scope", "");
+        Set<String> tokenScopes = new HashSet<>(Arrays.asList(scopeClaim.split(Constants.SPACE)));
+        String templateName = schemaVersionService.resolveTemplateName(vcRequestDto, credentialRequest.getSchema_version(), tokenScopes);
+        schemaVersionService.validateProvidedData(templateName, providedDataJson);
+        return templateName;
     }
 
     private List<String> signQrEntries(Credential cred, JSONArray qrDataJson, String templateName) throws JsonProcessingException {
